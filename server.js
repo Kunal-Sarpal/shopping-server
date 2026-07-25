@@ -3,6 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import { existsSync } from 'fs';
 import connectDB from './config/db.js';
 import authRoutes from './routes/auth.js';
 import productRoutes from './routes/products.js';
@@ -20,7 +21,7 @@ dotenv.config({ path: join(__dirname, '.env') });
 const app = express();
 const PORT = process.env.PORT || 5001;
 
-// Connect to MongoDB
+// Connect to MongoDB (non-blocking)
 connectDB();
 
 // Middleware
@@ -31,9 +32,13 @@ app.use(cors({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Serve frontend production build statically
+// Check if frontend dist exists
 const distPath = join(__dirname, '..', 'suraj', 'dist');
-app.use(express.static(distPath));
+const hasFrontendDist = existsSync(join(distPath, 'index.html'));
+
+if (hasFrontendDist) {
+  app.use(express.static(distPath));
+}
 
 // API Routes
 app.use('/api/auth', authRoutes);
@@ -48,10 +53,17 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// SPA fallback for React Client-Side Routing
+// Root / SPA fallback for React Client-Side Routing
 app.use((req, res, next) => {
   if (req.path.startsWith('/api')) return next();
-  res.sendFile(join(distPath, 'index.html'));
+  if (hasFrontendDist) {
+    return res.sendFile(join(distPath, 'index.html'));
+  }
+  res.json({
+    status: 'online',
+    message: 'Fashion ERP API Server',
+    health: '/api/health'
+  });
 });
 
 // Error handling middleware
@@ -61,6 +73,6 @@ app.use((err, req, res, next) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`\n🚀 Fashion ERP Backend & Frontend running on http://localhost:${PORT}`);
+  console.log(`\n🚀 Fashion ERP Backend running on http://localhost:${PORT}`);
   console.log(`   Health check: http://localhost:${PORT}/api/health\n`);
 });
