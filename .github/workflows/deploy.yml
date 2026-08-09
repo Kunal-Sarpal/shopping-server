@@ -1,0 +1,57 @@
+name: Deploy Backend to EC2
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    name: Deploy to EC2
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: SSH and Deploy to EC2
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          port: 22
+          script: |
+            # Navigate to project directory (auto-detect if secret is not set)
+            PROJECT_PATH="${{ secrets.EC2_PROJECT_PATH }}"
+            if [ -z "$PROJECT_PATH" ]; then
+              if [ -d "/var/www/shopping-server" ]; then
+                PROJECT_PATH="/var/www/shopping-server"
+              else
+                # Find a folder in the home/workspace containing server.js
+                FOUND_PATH=$(find $HOME -maxdepth 3 -type f -name "server.js" -exec dirname {} \; | grep -v "node_modules" | head -n 1)
+                if [ -n "$FOUND_PATH" ]; then
+                  PROJECT_PATH="$FOUND_PATH"
+                else
+                  PROJECT_PATH="$HOME"
+                fi
+              fi
+            fi
+
+            echo "Deploying to: $PROJECT_PATH"
+            cd "$PROJECT_PATH"
+
+            # Fetch and reset to latest main branch commit
+            git fetch origin main
+            git reset --hard origin/main
+
+            # Navigate into server directory if at the repo root
+            if [ -d "server" ]; then
+              cd server
+            fi
+
+            # Install only production dependencies
+            npm install --omit=dev
+
+            # Restart backend process using PM2
+            pm2 restart shopping-backend || pm2 start server.js --name "shopping-backend"

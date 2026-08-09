@@ -42,20 +42,16 @@ export const login = async (req, res) => {
       if (foundFallback) {
         user = foundFallback;
       } else {
-        const namePart = cleanEmail.split('@')[0] || 'User';
-        const formattedName = namePart.charAt(0).toUpperCase() + namePart.slice(1);
-        user = {
-          _id: `user-${Date.now()}`,
-          email: cleanEmail,
-          role: 'Manager',
-          name: formattedName,
-          initials: formattedName.slice(0, 2).toUpperCase()
-        };
+        return res.status(401).json({ error: 'User does not exist. Please sign up first.' });
       }
-    } else if (password && user.password) {
-      const isMatch = await bcrypt.compare(password, user.password).catch(() => true);
-      if (!isMatch) {
-        return res.status(401).json({ error: 'Invalid credentials.' });
+    } else {
+      if (password && user.password) {
+        const isMatch = await bcrypt.compare(password, user.password).catch(() => false);
+        if (!isMatch) {
+          return res.status(401).json({ error: 'Invalid email or password.' });
+        }
+      } else {
+        return res.status(401).json({ error: 'Invalid credentials. Password is required.' });
       }
     }
 
@@ -112,6 +108,78 @@ export const getMe = async (req, res) => {
     });
   } catch (err) {
     console.error('GetMe error:', err);
+    res.status(500).json({ error: err.message || 'Server error' });
+  }
+};
+
+export const signup = async (req, res) => {
+  try {
+    const { name, email, password } = req.body;
+    if (!name || !email || !password) {
+      return res.status(400).json({ error: 'All fields are required.' });
+    }
+
+    const cleanEmail = String(email).toLowerCase().trim();
+
+    if (User.db && User.db.readyState === 1) {
+      const existingUser = await User.findOne({ email: cleanEmail });
+      if (existingUser) {
+        return res.status(400).json({ error: 'User already exists.' });
+      }
+
+      const hashedPassword = await bcrypt.hash(password, 10);
+      const namePart = name.trim();
+      const initials = namePart.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
+
+      const newUser = new User({
+        name: namePart,
+        email: cleanEmail,
+        password: hashedPassword,
+        role: 'Customer',
+        initials: initials || 'ME'
+      });
+
+      await newUser.save();
+
+      const token = jwt.sign(
+        { userId: newUser._id, email: newUser.email, role: newUser.role, name: newUser.name, initials: newUser.initials },
+        JWT_SECRET,
+        { expiresIn: '30d' }
+      );
+
+      return res.json({
+        token,
+        user: {
+          name: newUser.name,
+          email: newUser.email,
+          role: newUser.role,
+          initials: newUser.initials
+        }
+      });
+    } else {
+      const namePart = name.trim();
+      const initials = namePart.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
+      const mockUser = {
+        _id: `user-${Date.now()}`,
+        name: namePart,
+        email: cleanEmail,
+        role: 'Customer',
+        initials: initials || 'ME'
+      };
+
+      const token = jwt.sign(
+        { userId: mockUser._id, email: mockUser.email, role: mockUser.role, name: mockUser.name, initials: mockUser.initials },
+        JWT_SECRET,
+        { expiresIn: '30d' }
+      );
+
+      return res.json({
+        token,
+        user: mockUser
+      });
+    }
+  } catch (err) {
+    console.error('Signup error:', err);
     res.status(500).json({ error: err.message || 'Server error' });
   }
 };
