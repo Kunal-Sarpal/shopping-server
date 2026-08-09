@@ -22,6 +22,12 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           port: 22
           script: |
+            # Load NVM and environment variables for non-interactive shell
+            export NVM_DIR="$HOME/.nvm"
+            [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+            source $HOME/.profile || true
+            source $HOME/.bashrc || true
+
             # Navigate to project directory (auto-detect if secret is not set)
             PROJECT_PATH="${{ secrets.EC2_PROJECT_PATH }}"
             if [ -z "$PROJECT_PATH" ]; then
