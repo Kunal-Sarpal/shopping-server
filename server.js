@@ -41,6 +41,9 @@ if (hasFrontendDist) {
   app.use(express.static(distPath));
 }
 
+// Serve uploaded files statically for local fallback testing
+app.use('/uploads', express.static(join(__dirname, 'uploads')));
+
 // API Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/products', productRoutes);
