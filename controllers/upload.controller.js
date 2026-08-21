@@ -35,7 +35,14 @@ export const uploadFile = async (req, res) => {
 
       const region = process.env.AWS_REGION || 'ap-south-1';
       const bucket = process.env.S3_BUCKET_NAME;
-      const url = `https://${bucket}.s3.${region}.amazonaws.com/${key}`;
+      
+      let url;
+      if (process.env.CLOUDFRONT_URL) {
+        const cfBase = process.env.CLOUDFRONT_URL.replace(/\/$/, "");
+        url = `${cfBase}/${key}`;
+      } else {
+        url = `https://${bucket}.s3.${region}.amazonaws.com/${key}`;
+      }
 
       return res.status(200).json({
         message: "File uploaded successfully to S3",
