@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import { Product } from '../models/Product.js';
+import { resolveImageUrl, resolveImages } from '../config/s3.js';
 
 const STORE_FALLBACK_PRODUCTS = [
   {
@@ -156,7 +157,14 @@ export const getStoreProducts = async (req, res) => {
         .limit(parseInt(limit));
 
       if (dbProducts.length > 0) {
-        products = dbProducts;
+        products = await Promise.all(dbProducts.map(async (p) => {
+          const resolvedImages = await resolveImages(p.images || [], req);
+          const resolvedImageUrl = await resolveImageUrl(p.image_url, req);
+          const obj = p.toObject();
+          obj.images = resolvedImages;
+          obj.image_url = resolvedImageUrl;
+          return obj;
+        }));
         total = await Product.countDocuments(query);
       }
     }
@@ -208,7 +216,14 @@ export const getStoreProductDetails = async (req, res) => {
     let product = null;
 
     if (mongoose.connection.readyState === 1 && mongoose.Types.ObjectId.isValid(id)) {
-      product = await Product.findById(id);
+      const dbProduct = await Product.findById(id);
+      if (dbProduct) {
+        const resolvedImages = await resolveImages(dbProduct.images || [], req);
+        const resolvedImageUrl = await resolveImageUrl(dbProduct.image_url, req);
+        product = dbProduct.toObject();
+        product.images = resolvedImages;
+        product.image_url = resolvedImageUrl;
+      }
     }
 
     if (!product) {

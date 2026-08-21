@@ -1,4 +1,5 @@
 import { Product } from '../models/Product.js';
+import { resolveImageUrl, resolveImages } from '../config/s3.js';
 
 const FALLBACK_PRODUCTS = [
   {
@@ -192,28 +193,32 @@ export const getProducts = async (req, res) => {
         .limit(parseInt(limit));
 
       if (dbProducts.length > 0) {
-        products = dbProducts.map(p => ({
-          product_id: p._id,
-          sku: p.sku,
-          name: p.product_name,
-          category: p.category,
-          model: p.model,
-          designer: p.designer,
-          vendor: p.vendor,
-          mrp: p.mrp,
-          costPrice: p.costPrice,
-          purchasePrice: p.purchasePrice,
-          sellingPrice: p.sellingPrice,
-          stock: p.stock,
-          sold: p.sold,
-          status: p.status,
-          shelf: p.shelf,
-          gender: p.gender || 'Women',
-          description: p.description || '',
-          image_url: p.image_url || (p.images && p.images[0]) || 'https://images.unsplash.com/photo-1583391733956-3750e0ff4e8b?auto=format&fit=crop&w=800&q=80',
-          images: (p.images && p.images.length > 0) ? p.images : [p.image_url || 'https://images.unsplash.com/photo-1583391733956-3750e0ff4e8b?auto=format&fit=crop&w=800&q=80'],
-          sizes: p.sizes || ['S', 'M', 'L', 'XL'],
-          discount_percent: p.discount_percent || 0
+        products = await Promise.all(dbProducts.map(async (p) => {
+          const resolvedImages = await resolveImages(p.images || [], req);
+          const resolvedImageUrl = await resolveImageUrl(p.image_url, req);
+          return {
+            product_id: p._id,
+            sku: p.sku,
+            name: p.product_name,
+            category: p.category,
+            model: p.model,
+            designer: p.designer,
+            vendor: p.vendor,
+            mrp: p.mrp,
+            costPrice: p.costPrice,
+            purchasePrice: p.purchasePrice,
+            sellingPrice: p.sellingPrice,
+            stock: p.stock,
+            sold: p.sold,
+            status: p.status,
+            shelf: p.shelf,
+            gender: p.gender || 'Women',
+            description: p.description || '',
+            image_url: resolvedImageUrl || (resolvedImages && resolvedImages[0]) || 'https://images.unsplash.com/photo-1583391733956-3750e0ff4e8b?auto=format&fit=crop&w=800&q=80',
+            images: (resolvedImages && resolvedImages.length > 0) ? resolvedImages : [resolvedImageUrl || 'https://images.unsplash.com/photo-1583391733956-3750e0ff4e8b?auto=format&fit=crop&w=800&q=80'],
+            sizes: p.sizes || ['S', 'M', 'L', 'XL'],
+            discount_percent: p.discount_percent || 0
+          };
         }));
 
         categoriesList = await Product.distinct('category');
