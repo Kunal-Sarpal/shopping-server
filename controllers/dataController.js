@@ -81,7 +81,8 @@ export const getOrders = async (req, res) => {
             payment: o.payment_method,
             status: o.order_status,
             payment_status: o.payment_status,
-            itemList: o.items || []
+            itemList: o.items || [],
+            address: o.delivery_address || o.address || ''
           };
         });
       }
@@ -112,7 +113,8 @@ export const getOrders = async (req, res) => {
           payment: o.payment_method,
           status: o.order_status,
           payment_status: o.payment_status,
-          itemList: o.items || []
+          itemList: o.items || [],
+          address: o.delivery_address || o.address || ''
         };
       });
     }
