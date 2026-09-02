@@ -64,10 +64,14 @@ export const login = async (req, res) => {
     return res.json({
       token,
       user: {
+        _id: user._id,
         name: user.name,
         email: user.email,
         role: user.role,
         initials: user.initials,
+        phone: user.phone || '',
+        default_address: user.default_address || '',
+        addresses: user.addresses || []
       },
     });
   } catch (err) {
@@ -91,19 +95,27 @@ export const getMe = async (req, res) => {
 
     if (!user) {
       user = {
+        _id: req.user.userId || 'user-001',
         name: req.user.name || 'Suraj Demo',
         email: req.user.email || 'manager@fashionco.com',
         role: req.user.role || 'Manager',
-        initials: req.user.initials || 'SD'
+        initials: req.user.initials || 'SD',
+        phone: req.user.phone || '',
+        default_address: '',
+        addresses: []
       };
     }
 
     res.json({
       user: {
+        _id: user._id,
         name: user.name,
         email: user.email,
         role: user.role,
         initials: user.initials,
+        phone: user.phone || '',
+        default_address: user.default_address || '',
+        addresses: user.addresses || []
       },
     });
   } catch (err) {
@@ -136,7 +148,10 @@ export const signup = async (req, res) => {
         email: cleanEmail,
         password: hashedPassword,
         role: 'Customer',
-        initials: initials || 'ME'
+        initials: initials || 'ME',
+        phone: '',
+        default_address: '',
+        addresses: []
       });
 
       await newUser.save();
@@ -150,10 +165,14 @@ export const signup = async (req, res) => {
       return res.json({
         token,
         user: {
+          _id: newUser._id,
           name: newUser.name,
           email: newUser.email,
           role: newUser.role,
-          initials: newUser.initials
+          initials: newUser.initials,
+          phone: '',
+          default_address: '',
+          addresses: []
         }
       });
     } else {
@@ -164,7 +183,10 @@ export const signup = async (req, res) => {
         name: namePart,
         email: cleanEmail,
         role: 'Customer',
-        initials: initials || 'ME'
+        initials: initials || 'ME',
+        phone: '',
+        default_address: '',
+        addresses: []
       };
 
       const token = jwt.sign(
@@ -180,6 +202,65 @@ export const signup = async (req, res) => {
     }
   } catch (err) {
     console.error('Signup error:', err);
+    res.status(500).json({ error: err.message || 'Server error' });
+  }
+};
+
+export const updateProfile = async (req, res) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ error: 'Unauthenticated' });
+    }
+
+    const { name, phone, default_address, addresses } = req.body;
+    let updatedUser = null;
+
+    if (User.db && User.db.readyState === 1) {
+      try {
+        const updateFields = {};
+        if (name !== undefined) updateFields.name = name;
+        if (phone !== undefined) updateFields.phone = phone;
+        if (default_address !== undefined) updateFields.default_address = default_address;
+        if (addresses !== undefined) updateFields.addresses = addresses;
+
+        updatedUser = await User.findByIdAndUpdate(
+          req.user.userId,
+          { $set: updateFields },
+          { new: true }
+        );
+      } catch (e) {
+        console.warn('MongoDB updateProfile fallback:', e.message);
+      }
+    }
+
+    if (!updatedUser) {
+      updatedUser = {
+        _id: req.user.userId,
+        name: name || req.user.name,
+        email: req.user.email,
+        role: req.user.role,
+        initials: req.user.initials,
+        phone: phone || '',
+        default_address: default_address || '',
+        addresses: addresses || []
+      };
+    }
+
+    res.json({
+      success: true,
+      user: {
+        _id: updatedUser._id,
+        name: updatedUser.name,
+        email: updatedUser.email,
+        role: updatedUser.role,
+        initials: updatedUser.initials,
+        phone: updatedUser.phone || '',
+        default_address: updatedUser.default_address || '',
+        addresses: updatedUser.addresses || []
+      }
+    });
+  } catch (err) {
+    console.error('Update profile error:', err);
     res.status(500).json({ error: err.message || 'Server error' });
   }
 };

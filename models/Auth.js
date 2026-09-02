@@ -15,6 +15,18 @@ const userSchema = new mongoose.Schema({
   role: String, // Storing role name directly for easier querying (from previous logic)
   initials: String,
   phone: String,
+  default_address: String,
+  addresses: [{
+    id: String,
+    name: String,
+    phone: String,
+    addressLine: String,
+    city: String,
+    state: String,
+    pincode: String,
+    tag: { type: String, default: 'Home' },
+    isDefault: { type: Boolean, default: false }
+  }],
   is_active: { type: Boolean, default: true }
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
 export const User = mongoose.model('User', userSchema);
