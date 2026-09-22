@@ -69,24 +69,23 @@ export const createSize = async (req, res) => {
 export const getProductSpecification = async (req, res) => {
   try {
     const { productId } = req.params;
-    let spec = await ProductSpecification.findOne({ product_id: productId });
-    if (!spec) {
-      // Default initial specification
-      spec = {
-        product_id: productId,
-        fabric_type: 'Cotton',
-        fibre_type: 'Natural',
-        composition: '100% Combed Cotton',
-        gsm: 180,
-        fabric_finish: 'Bio-Washed',
-        fabric_construction: 'Knitted Single Jersey',
-        neck_type: 'Round Neck',
-        sleeve_type: 'Half Sleeve',
-        fit: 'Regular Fit',
-        packaging_details: 'Individual Polybag with Barcode'
-      };
+    if (productId) {
+      let spec = await ProductSpecification.findOne({
+        $or: [{ product_id: productId }, { _id: productId }]
+      });
+      return res.json(spec || {});
     }
-    res.json(spec);
+    const specs = await ProductSpecification.find().sort({ name: 1 });
+    res.json(specs);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+export const getProductSpecifications = async (req, res) => {
+  try {
+    const specs = await ProductSpecification.find().sort({ name: 1 });
+    res.json(specs);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -94,19 +93,25 @@ export const getProductSpecification = async (req, res) => {
 
 export const saveProductSpecification = async (req, res) => {
   try {
-    const { product_id, ...specs } = req.body;
-    if (!product_id) return res.status(400).json({ error: 'product_id is required' });
-
-    const updated = await ProductSpecification.findOneAndUpdate(
-      { product_id },
-      { $set: specs },
-      { new: true, upsert: true, setDefaultsOnInsert: true }
-    );
-
-    // Link spec to product record
-    await Product.findByIdAndUpdate(product_id, { $set: { spec_id: updated._id } });
-
-    res.json({ success: true, spec: updated });
+    const { product_id, name, ...specs } = req.body;
+    let spec = null;
+    if (product_id) {
+      spec = await ProductSpecification.findOneAndUpdate(
+        { product_id },
+        { $set: { product_id, name, ...specs } },
+        { new: true, upsert: true, setDefaultsOnInsert: true }
+      );
+      await Product.findByIdAndUpdate(product_id, { $set: { spec_id: spec._id } });
+    } else if (name) {
+      spec = await ProductSpecification.findOneAndUpdate(
+        { name },
+        { $set: { name, ...specs } },
+        { new: true, upsert: true, setDefaultsOnInsert: true }
+      );
+    } else {
+      spec = await ProductSpecification.create(req.body);
+    }
+    res.status(201).json(spec);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -117,11 +122,15 @@ export const saveProductSpecification = async (req, res) => {
 // ═══════════════════════════════════════════════════════════
 export const getProductVariants = async (req, res) => {
   try {
-    const { productId } = req.query;
-    const query = productId ? { product_id: productId } : {};
+    const { productId, specId } = req.query;
+    const query = {};
+    if (productId) query.product_id = productId;
+    if (specId) query.spec_id = specId;
+
     const variants = await ProductVariant.find(query)
       .populate('colour_id')
       .populate('size_id')
+      .populate('spec_id')
       .sort({ sku: 1 });
     res.json(variants);
   } catch (err) {
@@ -132,36 +141,45 @@ export const getProductVariants = async (req, res) => {
 // Generate Variants Matrix (e.g. 2 Colours × 3 Sizes = 6 SKUs)
 export const generateVariantsMatrix = async (req, res) => {
   try {
-    const { productId, colourIds = [], sizeIds = [], basePrice } = req.body;
-    if (!productId) return res.status(400).json({ error: 'productId is required' });
+    const { productId, specId, colourIds = [], sizeIds = [], basePrice, costPrice, skuPrefix, initialStock = 0 } = req.body;
 
-    const product = await Product.findById(productId);
-    if (!product) return res.status(404).json({ error: 'Product not found' });
+    let product = null;
+    let spec = null;
+
+    if (productId) product = await Product.findById(productId);
+    if (specId) spec = await ProductSpecification.findById(specId);
+
+    if (!product && !spec) {
+      return res.status(400).json({ error: 'productId or specId is required' });
+    }
 
     const colours = await Colour.find({ _id: { $in: colourIds } });
     const sizes = await Size.find({ _id: { $in: sizeIds } });
 
     const createdVariants = [];
+    const effectivePrefix = (skuPrefix && skuPrefix.trim()) || (product?.sku ? product.sku.split('-')[0] : (spec?.name ? spec.name.replace(/[^a-zA-Z0-9]/g, '').slice(0, 8).toUpperCase() : 'HGLX'));
 
     for (const col of colours) {
       for (const sz of sizes) {
-        const skuPrefix = product.sku ? product.sku.split('-')[0] : 'SKU';
-        const generatedSku = `${skuPrefix}-${col.code || col.name.slice(0, 3).toUpperCase()}-${sz.name.toUpperCase()}`;
+        const colCode = col.code || col.name.slice(0, 3).toUpperCase();
+        const sizeCode = sz.code || sz.name.toUpperCase();
+        const generatedSku = `${effectivePrefix}-${colCode}-${sizeCode}`;
 
-        // Upsert variant
         const variant = await ProductVariant.findOneAndUpdate(
           { sku: generatedSku },
           {
             $set: {
-              product_id: product._id,
+              ...(product ? { product_id: product._id } : {}),
+              ...(spec ? { spec_id: spec._id } : {}),
               colour_id: col._id,
               colour_name: col.name,
               size_id: sz._id,
               size_name: sz.name,
-              mrp: product.mrp,
-              selling_price: basePrice || product.sellingPrice,
-              cost_price: product.costPrice,
-              purchase_price: product.purchasePrice,
+              mrp: product ? product.mrp : (basePrice || spec?.base_price || 0),
+              selling_price: basePrice || (product ? product.sellingPrice : (spec?.base_price || 0)),
+              cost_price: costPrice || (product ? product.costPrice : (spec?.cost_price || 0)),
+              purchase_price: costPrice || (product ? product.purchasePrice : (spec?.cost_price || 0)),
+              stock_quantity: initialStock,
               status: 'Active'
             }
           },
@@ -174,6 +192,7 @@ export const generateVariantsMatrix = async (req, res) => {
     res.status(201).json({
       success: true,
       count: createdVariants.length,
+      createdCount: createdVariants.length,
       variants: createdVariants
     });
   } catch (err) {
@@ -186,7 +205,20 @@ export const generateVariantsMatrix = async (req, res) => {
 // ═══════════════════════════════════════════════════════════
 export const getWarehouses = async (req, res) => {
   try {
-    const warehouses = await Warehouse.find().sort({ name: 1 });
+    let warehouses = await Warehouse.find().sort({ name: 1 });
+    if (warehouses.length === 0) {
+      const defaultWh = await Warehouse.create({
+        name: 'Main Showroom & Fulfillment Center',
+        code: 'MAIN-WH',
+        type: 'Main Warehouse',
+        address: 'GIDC Apparel Park, Ring Road',
+        city: 'Surat',
+        state: 'Gujarat',
+        pincode: '395002',
+        is_active: true
+      });
+      warehouses = [defaultWh];
+    }
     res.json(warehouses);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -218,9 +250,10 @@ export const createWarehouse = async (req, res) => {
 // Overview of real stock by SKU across Warehouses
 export const getInventoryStock = async (req, res) => {
   try {
-    const { warehouseId, search } = req.query;
-    const match = { status: 'AVAILABLE' };
+    const { warehouseId, search, variantId } = req.query;
+    const match = {};
     if (warehouseId) match.warehouse_id = warehouseId;
+    if (variantId) match.variant_id = variantId;
 
     const lots = await InventoryLot.find(match)
       .populate('variant_id')
@@ -228,7 +261,7 @@ export const getInventoryStock = async (req, res) => {
       .populate('material_id')
       .sort({ updated_at: -1 });
 
-    res.json(lots);
+    res.json({ lots, count: lots.length });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -236,18 +269,22 @@ export const getInventoryStock = async (req, res) => {
 
 export const getInventoryTransactions = async (req, res) => {
   try {
-    const { page = 1, limit = 20, type } = req.query;
+    const { page = 1, limit = 50, type, warehouseId } = req.query;
     const query = {};
-    if (type && type !== 'All') query.transaction_type = type;
+    if (type && type !== 'ALL' && type !== 'All') query.transaction_type = type;
+    if (warehouseId) query.warehouse_id = warehouseId;
 
     const total = await InventoryTransaction.countDocuments(query);
     const offset = (parseInt(page) - 1) * parseInt(limit);
 
     const txns = await InventoryTransaction.find(query)
       .populate('warehouse_id')
-      .populate('variant_id')
+      .populate({
+        path: 'variant_id',
+        populate: { path: 'spec_id' }
+      })
       .populate('material_id')
-      .sort({ transaction_date: -1 })
+      .sort({ transaction_date: -1, createdAt: -1 })
       .skip(offset)
       .limit(parseInt(limit));
 
@@ -264,15 +301,44 @@ export const getInventoryTransactions = async (req, res) => {
 
 export const adjustInventory = async (req, res) => {
   try {
-    const { lotId, quantityAdjustment, reason } = req.body;
-    if (!lotId || quantityAdjustment === undefined) {
-      return res.status(400).json({ error: 'lotId and quantityAdjustment are required' });
+    const { lotId, variantId, warehouseId, quantityAdjustment, quantityChange, reason, adjustmentType } = req.body;
+    const rawQty = quantityAdjustment !== undefined ? quantityAdjustment : quantityChange;
+    const qtyChange = parseInt(rawQty);
+    if (isNaN(qtyChange)) {
+      return res.status(400).json({ error: 'quantityAdjustment or quantityChange is required' });
+    }
+
+    let targetLotId = lotId;
+    if (!targetLotId && variantId) {
+      let lot = await InventoryLot.findOne({ variant_id: variantId });
+      if (!lot) {
+        let whId = warehouseId;
+        if (!whId) {
+          const wh = await Warehouse.findOne();
+          whId = wh?._id;
+        }
+        lot = await InventoryLot.create({
+          lot_number: `LOT-ADJ-${Date.now().toString().slice(-6)}`,
+          warehouse_id: whId,
+          variant_id: variantId,
+          quantity_initial: Math.max(0, qtyChange),
+          quantity_available: Math.max(0, qtyChange),
+          quantity_reserved: 0,
+          quantity_damaged: 0,
+          status: 'Available'
+        });
+      }
+      targetLotId = lot._id;
+    }
+
+    if (!targetLotId) {
+      return res.status(400).json({ error: 'lotId or variantId is required' });
     }
 
     const result = await svcAdjustStock({
-      lotId,
-      quantityAdjustment: parseInt(quantityAdjustment),
-      reason: reason || 'Manual Stock Adjustment',
+      lotId: targetLotId,
+      quantityAdjustment: qtyChange,
+      reason: reason || adjustmentType || 'Manual Stock Adjustment',
       userId: req.user?.name || 'Store Manager'
     });
 
@@ -290,7 +356,7 @@ export const getPurchaseOrders = async (req, res) => {
     const pos = await PurchaseOrder.find()
       .populate('supplier_id')
       .populate('warehouse_id')
-      .sort({ po_date: -1 });
+      .sort({ po_date: -1, createdAt: -1 });
     res.json(pos);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -299,16 +365,26 @@ export const getPurchaseOrders = async (req, res) => {
 
 export const createPurchaseOrder = async (req, res) => {
   try {
-    const { supplierId, warehouseId, expectedDate, items, notes } = req.body;
-    if (!supplierId || !items || items.length === 0) {
-      return res.status(400).json({ error: 'Supplier and items are required' });
+    const { supplierId, supplier_id, supplierName, supplier_name, warehouseId, warehouse_id, expectedDate, expected_delivery_date, items, notes } = req.body;
+    const sName = supplierName || supplier_name || 'Artisan Supplier';
+
+    let whId = warehouseId || warehouse_id;
+    if (!whId) {
+      const wh = await Warehouse.findOne();
+      whId = wh?._id;
     }
 
     const po = await svcCreatePO({
-      supplierId,
-      warehouseId,
-      expectedDate,
-      items,
+      supplierId: supplierId || supplier_id || null,
+      supplierName: sName,
+      warehouseId: whId,
+      expectedDate: expectedDate || expected_delivery_date,
+      items: (items || []).map(i => ({
+        variantId: i.variantId || i.variant_id,
+        sku: i.sku,
+        orderedQuantity: i.orderedQuantity || i.ordered_quantity,
+        unitPrice: i.unitPrice || i.unit_price
+      })),
       notes,
       createdBy: req.user?.name || 'Procurement Team'
     });
@@ -324,7 +400,8 @@ export const getGoodsReceipts = async (req, res) => {
     const grns = await GoodsReceipt.find()
       .populate('supplier_id')
       .populate('warehouse_id')
-      .sort({ received_date: -1 });
+      .populate('purchase_order_id')
+      .sort({ received_date: -1, createdAt: -1 });
     res.json(grns);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -333,16 +410,26 @@ export const getGoodsReceipts = async (req, res) => {
 
 export const createGoodsReceipt = async (req, res) => {
   try {
-    const { purchaseOrderId, warehouseId, invoiceNumber, items } = req.body;
-    if (!purchaseOrderId || !warehouseId || !items || items.length === 0) {
-      return res.status(400).json({ error: 'PO, warehouse, and items are required' });
+    const { purchaseOrderId, warehouseId, invoiceNumber, supplierInvoiceNumber, items } = req.body;
+    let whId = warehouseId;
+    if (!whId) {
+      const wh = await Warehouse.findOne();
+      whId = wh?._id;
     }
 
     const grn = await svcReceiveGRN({
       purchaseOrderId,
-      warehouseId,
-      invoiceNumber,
-      items,
+      warehouseId: whId,
+      invoiceNumber: invoiceNumber || supplierInvoiceNumber || `INV-${Date.now().toString().slice(-5)}`,
+      items: (items || []).map(i => ({
+        variantId: i.variantId || i.variant_id,
+        sku: i.sku,
+        receivedQuantity: i.receivedQuantity || i.received_quantity,
+        acceptedQuantity: i.acceptedQuantity || i.accepted_quantity,
+        rejectedQuantity: i.rejectedQuantity || i.rejected_quantity || 0,
+        rejectionReason: i.rejectionReason || i.rejection_reason || '',
+        unitCost: i.unitCost || i.unit_cost || 0
+      })),
       receivedBy: req.user?.name || 'Store Manager',
       inspectedBy: req.user?.name || 'QC Lead'
     });
@@ -367,17 +454,18 @@ export const getRawMaterials = async (req, res) => {
 
 export const createRawMaterial = async (req, res) => {
   try {
-    const { name, material_code, material_type, specification, unit, cost_per_unit, reorder_level } = req.body;
+    const { name, code, material_code, category, material_type, specification, unit, unit_of_measure, cost_per_unit, unit_cost, current_stock, reorder_level } = req.body;
     if (!name) return res.status(400).json({ error: 'Name is required' });
 
-    const code = material_code || `RM-${name.slice(0, 3).toUpperCase()}-${Math.floor(10 + Math.random() * 90)}`;
+    const mCode = (code || material_code || `RM-${name.slice(0, 3).toUpperCase()}-${Date.now() % 1000}`).toUpperCase();
     const rm = await RawMaterial.create({
-      material_code: code,
+      material_code: mCode,
       name,
-      material_type: material_type || 'Fabric',
+      material_type: category || material_type || 'Fabric',
       specification: specification || '',
-      unit: unit || 'meter',
-      cost_per_unit: parseFloat(cost_per_unit) || 0,
+      unit: unit_of_measure || unit || 'meter',
+      cost_per_unit: parseFloat(unit_cost || cost_per_unit) || 0,
+      current_stock: parseFloat(current_stock) || 0,
       reorder_level: parseInt(reorder_level) || 50
     });
     res.status(201).json(rm);
@@ -401,18 +489,24 @@ export const getBOMs = async (req, res) => {
 
 export const createBOM = async (req, res) => {
   try {
-    const { productId, variantId, items, version, estimatedLaborCost, notes } = req.body;
-    if (!productId || !items || items.length === 0) {
-      return res.status(400).json({ error: 'Product and BOM items are required' });
+    const { name, productId, variantId, variant_id, items, version, estimatedLaborCost, notes } = req.body;
+    if (!items || items.length === 0) {
+      return res.status(400).json({ error: 'BOM items are required' });
     }
 
     const bomNumber = `BOM-${Date.now().toString().slice(-6)}`;
     const bom = await BOM.create({
       bom_number: bomNumber,
-      product_id: productId,
-      variant_id: variantId || null,
+      name: name || `BOM for Garment ${bomNumber}`,
+      product_id: productId || null,
+      variant_id: variantId || variant_id || null,
       version: version || 'v1.0',
-      items,
+      items: items.map(i => ({
+        material_id: i.material_id || i.raw_material_id,
+        quantity: i.quantity || i.quantity_required || 1,
+        unit: i.unit || i.unit_of_measure || 'meter',
+        scrap_percent: i.scrap_percent || i.wastage_percentage || 0
+      })),
       estimated_labor_cost: parseFloat(estimatedLaborCost) || 0,
       notes: notes || ''
     });
@@ -425,12 +519,13 @@ export const createBOM = async (req, res) => {
 
 export const getBOMCalculations = async (req, res) => {
   try {
-    const { bomId, plannedQuantity } = req.query;
-    if (!bomId || !plannedQuantity) {
-      return res.status(400).json({ error: 'bomId and plannedQuantity are required' });
+    const bomId = req.params.id || req.params.bomId || req.query.bomId;
+    const quantity = parseInt(req.query.quantity || req.query.plannedQuantity || 1);
+    if (!bomId) {
+      return res.status(400).json({ error: 'bomId is required' });
     }
 
-    const calculation = await calculateBOMRequirements(bomId, parseInt(plannedQuantity) || 1);
+    const calculation = await calculateBOMRequirements(bomId, quantity);
     res.json(calculation);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -444,7 +539,7 @@ export const getProductionOrders = async (req, res) => {
       .populate('variant_id')
       .populate('bom_id')
       .populate('warehouse_id')
-      .sort({ planned_start_date: -1 });
+      .sort({ planned_start_date: -1, createdAt: -1 });
     res.json(orders);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -453,20 +548,33 @@ export const getProductionOrders = async (req, res) => {
 
 export const createProductionOrder = async (req, res) => {
   try {
-    const { productId, variantId, bomId, plannedQuantity, warehouseId, plannedStartDate, plannedEndDate, notes } = req.body;
-    if (!productId || !bomId || !plannedQuantity) {
-      return res.status(400).json({ error: 'Product, BOM, and plannedQuantity are required' });
+    const { productId, product_id, variantId, variant_id, bomId, bom_id, plannedQuantity, targetQuantity, target_quantity, warehouseId, warehouse_id, plannedStartDate, plannedCompletionDate, notes } = req.body;
+    const bId = bomId || bom_id;
+    const qty = parseInt(targetQuantity || target_quantity || plannedQuantity || 1);
+    if (!bId) {
+      return res.status(400).json({ error: 'bomId is required' });
     }
 
-    const order = await svcCreateProdOrder({
-      productId,
-      variantId,
-      bomId,
-      plannedQuantity: parseInt(plannedQuantity),
-      warehouseId,
-      plannedStartDate,
-      plannedEndDate,
-      notes
+    let whId = warehouseId || warehouse_id;
+    if (!whId) {
+      const wh = await Warehouse.findOne();
+      whId = wh?._id;
+    }
+
+    const orderNumber = `PROD-${Date.now().toString().slice(-6)}`;
+    const order = await ProductionOrder.create({
+      production_order_number: orderNumber,
+      order_number: orderNumber,
+      product_id: productId || product_id || null,
+      variant_id: variantId || variant_id || null,
+      bom_id: bId,
+      planned_quantity: qty,
+      target_quantity: qty,
+      warehouse_id: whId,
+      planned_start_date: plannedStartDate || new Date(),
+      planned_end_date: plannedCompletionDate,
+      status: 'PLANNED',
+      notes: notes || ''
     });
 
     res.status(201).json(order);
@@ -478,13 +586,15 @@ export const createProductionOrder = async (req, res) => {
 export const createMaterialIssue = async (req, res) => {
   try {
     const { productionOrderId, warehouseId, items } = req.body;
-    if (!productionOrderId || !warehouseId || !items || items.length === 0) {
-      return res.status(400).json({ error: 'productionOrderId, warehouseId, and items are required' });
+    let whId = warehouseId;
+    if (!whId) {
+      const wh = await Warehouse.findOne();
+      whId = wh?._id;
     }
 
     const issue = await svcIssueMaterials({
       productionOrderId,
-      warehouseId,
+      warehouseId: whId,
       items,
       issuedBy: req.user?.name || 'Warehouse Lead'
     });
@@ -497,18 +607,24 @@ export const createMaterialIssue = async (req, res) => {
 
 export const recordProductionOutput = async (req, res) => {
   try {
-    const { productionOrderId, warehouseId, quantityProduced, quantityAccepted, quantityRejected, rejectionReason, unitCost } = req.body;
-    if (!productionOrderId || !warehouseId || !quantityProduced) {
-      return res.status(400).json({ error: 'Order, warehouse, and quantityProduced are required' });
+    const { productionOrderId, warehouseId, quantityProduced, acceptedQuantity, defectiveQuantity, quantityAccepted, quantityRejected, defectNotes, rejectionReason, unitCost } = req.body;
+    let whId = warehouseId;
+    if (!whId) {
+      const wh = await Warehouse.findOne();
+      whId = wh?._id;
     }
+
+    const aQty = parseInt(acceptedQuantity !== undefined ? acceptedQuantity : (quantityAccepted !== undefined ? quantityAccepted : quantityProduced || 0)) || 0;
+    const rQty = parseInt(defectiveQuantity !== undefined ? defectiveQuantity : (quantityRejected !== undefined ? quantityRejected : 0)) || 0;
+    const pQty = parseInt(quantityProduced !== undefined ? quantityProduced : (aQty + rQty)) || (aQty + rQty);
 
     const output = await svcRecordProdCompletion({
       productionOrderId,
-      warehouseId,
-      quantityProduced: parseInt(quantityProduced),
-      quantityAccepted: parseInt(quantityAccepted) || parseInt(quantityProduced),
-      quantityRejected: parseInt(quantityRejected) || 0,
-      rejectionReason: rejectionReason || '',
+      warehouseId: whId,
+      quantityProduced: pQty,
+      quantityAccepted: aQty,
+      quantityRejected: rQty,
+      rejectionReason: rejectionReason || defectNotes || '',
       unitCost: parseFloat(unitCost) || 0,
       inspectedBy: req.user?.name || 'QC Lead'
     });

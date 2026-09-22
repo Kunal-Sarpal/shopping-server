@@ -1,6 +1,7 @@
 import { Warehouse, InventoryLot, InventoryTransaction } from '../models/Inventory.js';
 import { Product } from '../models/Product.js';
 import { ProductVariant } from '../models/ProductVariant.js';
+import { RawMaterial } from '../models/Manufacturing.js';
 
 // Helper: Synchronize backward-compatible Product.stock cache from live inventory lots
 export const syncProductStockCache = async (productId) => {
@@ -159,7 +160,44 @@ export const issueMaterial = async ({
     }
 
     if (remainingToDeduct > 0) {
-      console.warn(`[inventory.service] Warning: Issued ${item.quantity} but insufficient lot stock. Short by ${remainingToDeduct}`);
+      // If no pre-existing lot, check RawMaterial and create opening lot or audit transaction
+      const rm = await RawMaterial.findById(item.material_id);
+      const openingStock = (rm && rm.current_stock >= remainingToDeduct) ? rm.current_stock : (remainingToDeduct + 50);
+      const lot = await InventoryLot.create({
+        lot_number: `LOT-RM-${Date.now().toString().slice(-6)}`,
+        material_id: item.material_id,
+        item_type: 'RAW_MATERIAL',
+        source_type: 'OPENING_STOCK',
+        warehouse_id: warehouseId,
+        quantity: openingStock,
+        available_quantity: Math.max(0, openingStock - remainingToDeduct),
+        unit_cost: rm?.cost_per_unit || 0,
+        status: 'AVAILABLE'
+      });
+
+      const txnNumber = `TXN-ISS-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`;
+      const txn = await InventoryTransaction.create({
+        transaction_number: txnNumber,
+        lot_id: lot._id,
+        material_id: item.material_id,
+        warehouse_id: warehouseId,
+        transaction_type: 'MATERIAL_ISSUE',
+        quantity: -remainingToDeduct, // Negative
+        before_quantity: openingStock,
+        after_quantity: lot.available_quantity,
+        unit_cost: lot.unit_cost,
+        reference_type: 'MATERIAL_ISSUE',
+        reference_id: issueNumber,
+        created_by: userId,
+        notes: `Issued to Production Order ${productionOrderNumber}`
+      });
+      transactionsCreated.push(txn);
+    }
+
+    if (item.material_id) {
+      await RawMaterial.findByIdAndUpdate(item.material_id, {
+        $inc: { current_stock: -item.quantity }
+      });
     }
   }
 

@@ -6,12 +6,12 @@ const rawMaterialSchema = new mongoose.Schema({
   name: { type: String, required: true, trim: true },
   material_type: {
     type: String,
-    enum: ['Fabric', 'Thread', 'Buttons', 'Zippers', 'Labels', 'Packaging', 'Other'],
     default: 'Fabric'
   },
   specification: { type: String, default: '' },
-  unit: { type: String, enum: ['meter', 'kg', 'piece', 'roll', 'yard'], default: 'meter' },
+  unit: { type: String, default: 'meter' },
   cost_per_unit: { type: Number, default: 0, min: 0 },
+  current_stock: { type: Number, default: 0 },
   reorder_level: { type: Number, default: 50 },
   status: { type: String, enum: ['Active', 'Inactive'], default: 'Active' }
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
@@ -23,14 +23,15 @@ const bomItemSchema = new mongoose.Schema({
   material_id: { type: mongoose.Schema.Types.ObjectId, ref: 'RawMaterial', required: true },
   material_name: { type: String, default: '' },
   quantity: { type: Number, required: true, min: 0.0001 },
-  unit: { type: String, required: true },
+  unit: { type: String, default: 'meter' },
   scrap_percent: { type: Number, default: 0, min: 0, max: 100 }
 });
 
 // 3. Bill of Materials (BOM)
 const bomSchema = new mongoose.Schema({
   bom_number: { type: String, required: true, unique: true, uppercase: true, index: true },
-  product_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Product', required: true, index: true },
+  name: { type: String, default: '' },
+  product_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Product', required: false, index: true },
   variant_id: { type: mongoose.Schema.Types.ObjectId, ref: 'ProductVariant' },
   version: { type: String, default: 'v1.0' },
   items: [bomItemSchema],
@@ -47,13 +48,17 @@ export const BOM = mongoose.model('BOM', bomSchema);
 // 4. Production Order (In-House Manufacturing)
 const productionOrderSchema = new mongoose.Schema({
   production_order_number: { type: String, required: true, unique: true, uppercase: true, index: true },
-  product_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Product', required: true },
+  order_number: { type: String }, // alias for production_order_number
+  product_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Product', required: false },
   variant_id: { type: mongoose.Schema.Types.ObjectId, ref: 'ProductVariant' },
   bom_id: { type: mongoose.Schema.Types.ObjectId, ref: 'BOM', required: true },
-  planned_quantity: { type: Number, required: true, min: 1 },
+  planned_quantity: { type: Number, default: 1, min: 1 },
+  target_quantity: { type: Number, default: 1 }, // alias for planned_quantity
   produced_quantity: { type: Number, default: 0 },
+  completed_quantity: { type: Number, default: 0 }, // alias for produced_quantity
   accepted_quantity: { type: Number, default: 0 },
   rejected_quantity: { type: Number, default: 0 },
+  scrap_quantity: { type: Number, default: 0 }, // alias for rejected_quantity
   warehouse_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Warehouse' },
   planned_start_date: { type: Date },
   planned_end_date: { type: Date },
@@ -61,7 +66,7 @@ const productionOrderSchema = new mongoose.Schema({
   actual_end_date: { type: Date },
   status: {
     type: String,
-    enum: ['DRAFT', 'PLANNED', 'RELEASED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED'],
+    enum: ['DRAFT', 'PLANNED', 'RELEASED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED', 'Draft', 'Planned', 'Released', 'In Progress', 'Completed', 'Cancelled'],
     default: 'DRAFT',
     index: true
   },

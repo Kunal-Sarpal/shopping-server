@@ -17,10 +17,12 @@ export const createProductionOrder = async ({
 
   const newOrder = await ProductionOrder.create({
     production_order_number: orderNumber,
-    product_id: productId,
-    variant_id: variantId,
+    order_number: orderNumber,
+    product_id: productId || null,
+    variant_id: variantId || null,
     bom_id: bomId,
-    planned_quantity: plannedQuantity,
+    planned_quantity: plannedQuantity || 1,
+    target_quantity: plannedQuantity || 1,
     warehouse_id: warehouseId,
     planned_start_date: plannedStartDate || new Date(),
     planned_end_date: plannedEndDate,
@@ -42,13 +44,25 @@ export const issueMaterialsToProduction = async ({
   if (!order) throw new Error('Production Order not found');
 
   const issueNumber = `ISS-${Date.now().toString().slice(-6)}`;
+  const poNum = order.production_order_number || order.order_number;
+
+  let issueItems = items;
+  if (!issueItems || issueItems.length === 0) {
+    const bomCalc = await calculateBOMRequirements(order.bom_id, order.planned_quantity || order.target_quantity || 1);
+    issueItems = (bomCalc.requirements || []).map(r => ({
+      material_id: r.material_id || r.materialId || r.raw_material_id,
+      material_name: r.material_name || '',
+      quantity: r.total_required_quantity || r.totalRequired || r.quantity || 1,
+      unit: r.unit || r.unit_of_measure || 'meter'
+    }));
+  }
 
   // Decrement inventory via centralized service
   await issueMaterial({
     issueNumber,
-    productionOrderNumber: order.production_order_number,
-    warehouseId,
-    items,
+    productionOrderNumber: poNum,
+    warehouseId: warehouseId || order.warehouse_id,
+    items: issueItems,
     userId: issuedBy
   });
 
@@ -56,12 +70,13 @@ export const issueMaterialsToProduction = async ({
   const issueDoc = await MaterialIssue.create({
     issue_number: issueNumber,
     production_order_id: order._id,
-    production_order_number: order.production_order_number,
-    warehouse_id: warehouseId,
-    items: items.map(i => ({
-      material_id: i.material_id,
-      quantity: i.quantity,
-      unit: i.unit,
+    production_order_number: poNum,
+    warehouse_id: warehouseId || order.warehouse_id,
+    items: (issueItems || []).map(i => ({
+      material_id: i.material_id || i.materialId || i.raw_material_id,
+      material_name: i.material_name || '',
+      quantity: i.quantity || 1,
+      unit: i.unit || i.unit_of_measure || 'meter',
       lot_number: i.lot_number || ''
     })),
     issued_by: issuedBy
@@ -83,6 +98,7 @@ export const recordProductionCompletion = async ({
   quantityRejected = 0,
   rejectionReason = '',
   unitCost = 0,
+  receivedBy,
   inspectedBy = 'QC Lead'
 }) => {
   const order = await ProductionOrder.findById(productionOrderId).populate('variant_id');
@@ -90,20 +106,22 @@ export const recordProductionCompletion = async ({
 
   const outputNumber = `OUT-${Date.now().toString().slice(-6)}`;
   const lotNumber = `LOT-PROD-${Date.now().toString().slice(-6)}`;
+  const poNum = order.production_order_number || order.order_number;
   const qcStatus = quantityRejected > 0 ? (quantityAccepted > 0 ? 'PARTIALLY_ACCEPTED' : 'REJECTED') : 'ACCEPTED';
+  const inspector = receivedBy || inspectedBy;
 
   // Ingest accepted finished goods into inventory
   if (quantityAccepted > 0) {
     await completeProduction({
       outputNumber,
-      productionOrderNumber: order.production_order_number,
+      productionOrderNumber: poNum,
       variantId: order.variant_id?._id || order.variant_id,
-      sku: order.variant_id?.sku || '',
-      warehouseId,
+      sku: order.variant_id?.sku || 'SKU',
+      warehouseId: warehouseId || order.warehouse_id,
       quantityAccepted,
       unitCost,
       lotNumber,
-      userId: inspectedBy
+      userId: inspector
     });
   }
 
@@ -111,26 +129,29 @@ export const recordProductionCompletion = async ({
   const outputDoc = await ProductionOutput.create({
     output_number: outputNumber,
     production_order_id: order._id,
-    production_order_number: order.production_order_number,
+    production_order_number: poNum,
     variant_id: order.variant_id?._id || order.variant_id,
-    sku: order.variant_id?.sku || '',
-    warehouse_id: warehouseId,
-    quantity_produced: quantityProduced,
+    sku: order.variant_id?.sku || 'SKU',
+    warehouse_id: warehouseId || order.warehouse_id,
+    quantity_produced: quantityProduced || (quantityAccepted + quantityRejected),
     quantity_accepted: quantityAccepted,
     quantity_rejected: quantityRejected,
     rejection_reason: rejectionReason,
     qc_status: qcStatus,
     lot_number: lotNumber,
     unit_cost: unitCost,
-    inspected_by: inspectedBy
+    inspected_by: inspector
   });
 
   // Update ProductionOrder totals and status
-  order.produced_quantity += quantityProduced;
-  order.accepted_quantity += quantityAccepted;
-  order.rejected_quantity += quantityRejected;
+  order.produced_quantity = (order.produced_quantity || 0) + (quantityProduced || (quantityAccepted + quantityRejected));
+  order.completed_quantity = (order.completed_quantity || 0) + quantityAccepted;
+  order.accepted_quantity = (order.accepted_quantity || 0) + quantityAccepted;
+  order.rejected_quantity = (order.rejected_quantity || 0) + quantityRejected;
+  order.scrap_quantity = order.rejected_quantity;
 
-  if (order.produced_quantity >= order.planned_quantity) {
+  const target = order.planned_quantity || order.target_quantity || 1;
+  if (order.produced_quantity >= target) {
     order.status = 'COMPLETED';
     order.actual_end_date = new Date();
   }

@@ -3,7 +3,7 @@ import { authenticate, optionalAuth } from '../middleware/auth.js';
 import {
   getColours, createColour,
   getSizes, createSize,
-  getProductSpecification, saveProductSpecification,
+  getProductSpecification, getProductSpecifications, saveProductSpecification,
   getProductVariants, generateVariantsMatrix,
   getWarehouses, createWarehouse,
   getInventoryStock, getInventoryTransactions, adjustInventory,
@@ -24,11 +24,16 @@ router.post('/colours', authenticate, createColour);
 router.get('/sizes', optionalAuth, getSizes);
 router.post('/sizes', authenticate, createSize);
 
-// Product Specifications
+// Product Specifications (supports both aliases)
+router.get('/specifications', optionalAuth, getProductSpecifications);
+router.post('/specifications', authenticate, saveProductSpecification);
+router.get('/product-specs', optionalAuth, getProductSpecifications);
 router.get('/product-specs/:productId', optionalAuth, getProductSpecification);
 router.post('/product-specs', authenticate, saveProductSpecification);
 
-// Product Variants
+// Product Variants (supports both aliases)
+router.get('/variants', optionalAuth, getProductVariants);
+router.post('/variants/matrix-generate', authenticate, generateVariantsMatrix);
 router.get('/product-variants', optionalAuth, getProductVariants);
 router.post('/product-variants/matrix', authenticate, generateVariantsMatrix);
 
@@ -41,13 +46,28 @@ router.get('/inventory/stock', optionalAuth, getInventoryStock);
 router.get('/inventory/transactions', optionalAuth, getInventoryTransactions);
 router.post('/inventory/adjust', authenticate, adjustInventory);
 
-// Procurement (Purchase Orders & GRN)
+// Procurement (Purchase Orders & GRN - supports both aliases)
+router.get('/procurement/orders', optionalAuth, getPurchaseOrders);
+router.post('/procurement/orders', authenticate, createPurchaseOrder);
+router.get('/procurement/grn', optionalAuth, getGoodsReceipts);
+router.post('/procurement/grn', authenticate, createGoodsReceipt);
 router.get('/purchase-orders', optionalAuth, getPurchaseOrders);
 router.post('/purchase-orders', authenticate, createPurchaseOrder);
 router.get('/goods-receipts', optionalAuth, getGoodsReceipts);
 router.post('/goods-receipts', authenticate, createGoodsReceipt);
 
-// Manufacturing (Raw Materials, BOM, Production)
+// Manufacturing (Raw Materials, BOM, Production - supports both aliases)
+router.get('/manufacturing/raw-materials', optionalAuth, getRawMaterials);
+router.post('/manufacturing/raw-materials', authenticate, createRawMaterial);
+router.get('/manufacturing/boms', optionalAuth, getBOMs);
+router.post('/manufacturing/boms', authenticate, createBOM);
+router.get('/manufacturing/boms/:id/calculate', optionalAuth, getBOMCalculations);
+router.get('/manufacturing/boms/calculate', optionalAuth, getBOMCalculations);
+router.get('/manufacturing/production-orders', optionalAuth, getProductionOrders);
+router.post('/manufacturing/production-orders', authenticate, createProductionOrder);
+router.post('/manufacturing/issue-materials', authenticate, createMaterialIssue);
+router.post('/manufacturing/complete-production', authenticate, recordProductionOutput);
+
 router.get('/raw-materials', optionalAuth, getRawMaterials);
 router.post('/raw-materials', authenticate, createRawMaterial);
 router.get('/boms', optionalAuth, getBOMs);

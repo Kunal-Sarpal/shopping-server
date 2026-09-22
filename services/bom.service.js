@@ -15,14 +15,18 @@ export const calculateBOMRequirements = async (bomId, plannedQuantity) => {
 
     return {
       material_id: rawMaterial?._id || item.material_id,
+      materialId: rawMaterial?._id || item.material_id,
+      raw_material_id: rawMaterial?._id || item.material_id,
       material_code: rawMaterial?.material_code || '',
       material_name: rawMaterial?.name || item.material_name,
       material_type: rawMaterial?.material_type || 'Fabric',
-      unit: item.unit,
+      unit: item.unit || 'meter',
+      unit_of_measure: item.unit || 'meter',
       unit_cost: unitCost,
       base_quantity: baseQty,
       scrap_percent: item.scrap_percent || 0,
       total_required_quantity: totalRequiredQty,
+      totalRequired: totalRequiredQty,
       total_estimated_cost: totalEstimatedCost
     };
   });

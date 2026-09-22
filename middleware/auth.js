@@ -5,7 +5,7 @@ import { dirname, join } from 'path';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-dotenv.config({ path: join(__dirname, '..', '..', '.env') });
+dotenv.config({ path: join(__dirname, '..', '.env') });
 
 const JWT_SECRET = process.env.JWT_SECRET || 'fashion_erp_jwt_secret_key_2025_suraj';
 
@@ -22,6 +22,7 @@ export const authenticate = (req, res, next) => {
     req.user = decoded;
     next();
   } catch (err) {
+    console.error('JWT verify error:', err.message, 'token:', token ? token.slice(0, 15) : 'none', 'using secret:', JWT_SECRET.slice(0, 10));
     return res.status(401).json({ error: 'Invalid or expired token.' });
   }
 };

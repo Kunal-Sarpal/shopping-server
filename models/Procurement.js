@@ -20,22 +20,23 @@ export const SupplierProduct = mongoose.model('SupplierProduct', supplierProduct
 const purchaseOrderItemSchema = new mongoose.Schema({
   variant_id: { type: mongoose.Schema.Types.ObjectId, ref: 'ProductVariant' },
   material_id: { type: mongoose.Schema.Types.ObjectId, ref: 'RawMaterial' },
-  item_name: { type: String, required: true },
+  item_name: { type: String, default: 'Product Item' },
   sku: { type: String, trim: true },
-  ordered_quantity: { type: Number, required: true, min: 1 },
+  ordered_quantity: { type: Number, default: 1, min: 1 },
   received_quantity: { type: Number, default: 0, min: 0 },
-  unit_price: { type: Number, required: true, min: 0 },
+  unit_price: { type: Number, default: 0, min: 0 },
   tax_percent: { type: Number, default: 5 },
-  total_price: { type: Number, required: true, min: 0 }
+  total_price: { type: Number, default: 0, min: 0 }
 });
 
 // 3. Purchase Order (Outsourced Procurement)
 const purchaseOrderSchema = new mongoose.Schema({
   po_number: { type: String, required: true, unique: true, uppercase: true, index: true },
-  supplier_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Supplier', required: true },
-  supplier_name: { type: String, default: '' },
+  supplier_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Supplier', required: false },
+  supplier_name: { type: String, default: 'Vendor Supplier' },
   po_date: { type: Date, default: Date.now },
   expected_date: { type: Date },
+  expected_delivery_date: { type: Date }, // alias
   warehouse_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Warehouse' },
   items: [purchaseOrderItemSchema],
   subtotal: { type: Number, default: 0 },
@@ -43,8 +44,7 @@ const purchaseOrderSchema = new mongoose.Schema({
   total_amount: { type: Number, default: 0 },
   status: {
     type: String,
-    enum: ['DRAFT', 'SUBMITTED', 'APPROVED', 'PARTIALLY_RECEIVED', 'RECEIVED', 'CANCELLED'],
-    default: 'DRAFT',
+    default: 'Ordered',
     index: true
   },
   created_by: { type: String, default: 'System' },
@@ -59,13 +59,16 @@ const grnItemSchema = new mongoose.Schema({
   po_item_id: { type: mongoose.Schema.Types.ObjectId },
   variant_id: { type: mongoose.Schema.Types.ObjectId, ref: 'ProductVariant' },
   material_id: { type: mongoose.Schema.Types.ObjectId, ref: 'RawMaterial' },
-  item_name: { type: String, required: true },
+  item_name: { type: String, default: 'Product Item' },
   sku: { type: String, trim: true },
-  quantity_received: { type: Number, required: true, min: 0 },
-  quantity_accepted: { type: Number, required: true, min: 0 },
+  quantity_received: { type: Number, default: 0, min: 0 },
+  received_quantity: { type: Number, default: 0 }, // alias
+  quantity_accepted: { type: Number, default: 0, min: 0 },
+  accepted_quantity: { type: Number, default: 0 }, // alias
   quantity_rejected: { type: Number, default: 0, min: 0 },
+  rejected_quantity: { type: Number, default: 0 }, // alias
   rejection_reason: { type: String, default: '' },
-  unit_cost: { type: Number, required: true, min: 0 },
+  unit_cost: { type: Number, default: 0, min: 0 },
   lot_number: { type: String, default: '' }
 });
 
@@ -73,23 +76,23 @@ const grnItemSchema = new mongoose.Schema({
 const goodsReceiptSchema = new mongoose.Schema({
   grn_number: { type: String, required: true, unique: true, uppercase: true, index: true },
   purchase_order_id: { type: mongoose.Schema.Types.ObjectId, ref: 'PurchaseOrder', required: true },
-  po_number: { type: String, required: true },
-  supplier_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Supplier', required: true },
+  po_number: { type: String, default: '' },
+  supplier_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Supplier', required: false },
   supplier_name: { type: String, default: '' },
-  warehouse_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Warehouse', required: true },
+  supplier_invoice_number: { type: String, default: '' }, // alias
   invoice_number: { type: String, default: '' },
+  warehouse_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Warehouse', required: true },
   received_date: { type: Date, default: Date.now },
   items: [grnItemSchema],
   total_accepted: { type: Number, default: 0 },
   total_rejected: { type: Number, default: 0 },
   qc_status: {
     type: String,
-    enum: ['QC_PENDING', 'ACCEPTED', 'PARTIALLY_ACCEPTED', 'REJECTED'],
     default: 'QC_PENDING'
   },
   received_by: { type: String, default: 'Store Manager' },
   inspected_by: { type: String, default: '' },
-  status: { type: String, enum: ['DRAFT', 'RECEIVED', 'CANCELLED'], default: 'RECEIVED' },
+  status: { type: String, default: 'RECEIVED' },
   notes: { type: String, default: '' }
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
 

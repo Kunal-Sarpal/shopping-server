@@ -26,7 +26,17 @@ export const Size = mongoose.model('Size', sizeSchema);
 
 // 3. Product Specification (Technical Pack & Garment Construction)
 const productSpecificationSchema = new mongoose.Schema({
-  product_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Product', required: true, unique: true },
+  product_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Product', required: false, sparse: true },
+  name: { type: String, trim: true },
+  category: { type: String, default: 'Ethnic Wear' },
+  gender: { type: String, default: 'Women' },
+  base_price: { type: Number, default: 0 },
+  cost_price: { type: Number, default: 0 },
+  fabric_gsm: { type: Number, default: 180 },
+  weave_type: { type: String, default: '' },
+  silhouette: { type: String, default: '' },
+  wash_care: { type: String, default: 'Dry Clean Only' },
+  description: { type: String, default: '' },
   fabric_type: { type: String, default: 'Cotton' },
   fibre_type: { type: String, default: 'Natural' },
   composition: { type: String, default: '100% Pure Combed Cotton' },
@@ -49,7 +59,8 @@ export const ProductSpecification = mongoose.model('ProductSpecification', produ
 
 // 4. Product Variant (SKU Level Entity)
 const productVariantSchema = new mongoose.Schema({
-  product_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Product', required: true, index: true },
+  product_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Product', required: false, index: true },
+  spec_id: { type: mongoose.Schema.Types.ObjectId, ref: 'ProductSpecification', index: true },
   colour_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Colour' },
   colour_name: { type: String, default: '' }, // String alias for fast read without populate
   size_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Size' },
@@ -60,9 +71,11 @@ const productVariantSchema = new mongoose.Schema({
   selling_price: { type: Number, default: 0 },
   cost_price: { type: Number, default: 0 },
   purchase_price: { type: Number, default: 0 },
+  stock_quantity: { type: Number, default: 0 },
   reorder_level: { type: Number, default: 10 },
   weight_grams: { type: Number, default: 250 },
   dimensions: { type: String, default: '' },
+  is_active: { type: Boolean, default: true },
   status: { type: String, enum: ['Active', 'Inactive', 'Discontinued'], default: 'Active' }
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
 
