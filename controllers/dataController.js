@@ -5,6 +5,7 @@ import {
   MoodBoard, LinkedProduct, OfflineSale, OnlineSale,
   Settlement, GstData, Feedback, DailyLog, ShelfLayout, BusinessProfile
 } from '../models/Data.js';
+import { dispatchSale, returnStock } from '../services/inventory.service.js';
 
 // ═══════════════════════════════════════════════════════════
 const FALLBACK_ORDERS = [
@@ -215,11 +216,13 @@ export const confirmOrderPayment = async (req, res) => {
       return res.status(400).json({ error: 'Order number is required' });
     }
 
+    let orderDoc = null;
     // Update in database if connected
     if (Order.db && Order.db.readyState === 1) {
-      await Order.updateOne(
+      orderDoc = await Order.findOneAndUpdate(
         { order_number: orderNumber },
-        { $set: { payment_status: 'Paid', order_status: 'Completed' } }
+        { $set: { payment_status: 'Paid', order_status: 'Completed' } },
+        { new: true }
       );
     }
 
@@ -228,6 +231,26 @@ export const confirmOrderPayment = async (req, res) => {
     if (target) {
       target.payment_status = 'Paid';
       target.order_status = 'Completed';
+      if (!orderDoc) orderDoc = target;
+    }
+
+    // Deduct inventory via ERP ledger if items exist
+    if (orderDoc && Array.isArray(orderDoc.items) && orderDoc.items.length > 0) {
+      try {
+        await dispatchSale({
+          orderNumber,
+          items: orderDoc.items.map(item => ({
+            variantId: item.variant_id || item.variantId || null,
+            productId: item.product_id || item.productId || null,
+            productName: item.item_name || item.name || 'Product',
+            quantity: item.quantity || 1,
+            unitPrice: item.unit_price || item.price || 0
+          })),
+          userId: orderDoc.customer_name || 'Store Customer'
+        });
+      } catch (ledgerErr) {
+        console.warn('ERP dispatchSale non-blocking warning:', ledgerErr.message);
+      }
     }
 
     res.json({

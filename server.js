@@ -12,6 +12,7 @@ import dashboardRoutes from './routes/dashboard.js';
 import storeRoutes from './routes/store.js';
 import analyticsRoutes from './routes/analytics.js';
 import uploadRoutes from './routes/upload.routes.js';
+import erpRoutes from './routes/erp.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -52,6 +53,8 @@ app.use('/api/analytics', analyticsRoutes);
 app.use('/api', dataRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/files', uploadRoutes);
+app.use('/api/erp', erpRoutes);
+app.use('/api', erpRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {

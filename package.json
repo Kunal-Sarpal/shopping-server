@@ -7,7 +7,9 @@
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js",
-    "build": "echo 'Server build complete'"
+    "build": "echo 'Server build complete'",
+    "migrate:erp": "node scripts/migrate_variants_and_inventory.js",
+    "seed:erp": "node scripts/seed_erp_complete.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1115.0",

@@ -86,6 +86,12 @@ const productSchema = new mongoose.Schema({
   hsn_code: String,
   status: { type: String, default: 'In Stock' },
   
+  // ERP Specification & Design links
+  spec_id: { type: mongoose.Schema.Types.ObjectId, ref: 'ProductSpecification' },
+  design_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Design' },
+  collection_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Collection' },
+  is_active: { type: Boolean, default: true },
+
   // New E-commerce specific fields
   image_url: String,
   images: [String],
