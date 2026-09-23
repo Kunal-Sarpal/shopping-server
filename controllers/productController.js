@@ -1,4 +1,6 @@
 import { Product } from '../models/Product.js';
+import { ProductVariant } from '../models/ProductVariant.js';
+import { Warehouse, InventoryLot } from '../models/Inventory.js';
 import { resolveImageUrl, resolveImages } from '../config/s3.js';
 
 const FALLBACK_PRODUCTS = [
@@ -303,10 +305,56 @@ export const createProduct = async (req, res) => {
         description,
         image_url: primaryImageUrl,
         images: parsedImages,
-        sizes: Array.isArray(sizes) ? sizes : sizes.split(',').map(s => s.trim()),
+        sizes: Array.isArray(sizes) ? sizes : (typeof sizes === 'string' ? sizes.split(',').map(s => s.trim()).filter(Boolean) : ['S', 'M', 'L', 'XL']),
         discount_percent: discount
       });
       createdId = newProduct._id;
+
+      // Automatically register ERP variants and lots for sizes
+      try {
+        if (Array.isArray(newProduct.sizes) && newProduct.sizes.length > 0) {
+          const defaultWh = await Warehouse.findOne({ is_active: true });
+          const whId = defaultWh?._id;
+          const varCount = newProduct.sizes.length;
+          const perVariantStock = Math.max(1, Math.floor(stockVal / varCount));
+
+          for (const sizeName of newProduct.sizes) {
+            const varSku = `${newProduct.sku}-${sizeName.toUpperCase()}`;
+            const existingVar = await ProductVariant.findOne({ sku: varSku });
+            if (!existingVar) {
+              const createdVar = await ProductVariant.create({
+                product_id: newProduct._id,
+                sku: varSku,
+                size_name: sizeName,
+                colour_name: 'Standard',
+                mrp: mrpNum,
+                selling_price: sellingPriceNum,
+                cost_price: parseFloat(costPrice) || 0,
+                purchase_price: parseFloat(purchasePrice) || 0,
+                stock_quantity: perVariantStock,
+                status: 'Active'
+              });
+
+              if (whId && perVariantStock > 0) {
+                await InventoryLot.create({
+                  lot_number: `LOT-${varSku}-${Date.now().toString().slice(-4)}`,
+                  variant_id: createdVar._id,
+                  sku: varSku,
+                  warehouse_id: whId,
+                  item_type: 'FINISHED_GOODS',
+                  source_type: 'INITIAL_STOCK',
+                  quantity: perVariantStock,
+                  available_quantity: perVariantStock,
+                  unit_cost: parseFloat(costPrice) || 0,
+                  status: 'AVAILABLE'
+                });
+              }
+            }
+          }
+        }
+      } catch (varErr) {
+        console.warn('Auto-variant registration notice:', varErr.message);
+      }
     } else {
       FALLBACK_PRODUCTS.unshift({
         product_id: createdId,

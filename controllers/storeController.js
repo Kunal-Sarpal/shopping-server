@@ -1,5 +1,7 @@
 import mongoose from 'mongoose';
 import { Product } from '../models/Product.js';
+import { ProductVariant, Colour, Size, ProductSpecification } from '../models/ProductVariant.js';
+import { InventoryLot } from '../models/Inventory.js';
 import { resolveImageUrl, resolveImages } from '../config/s3.js';
 
 const STORE_FALLBACK_PRODUCTS = [
@@ -163,6 +165,8 @@ export const getStoreProducts = async (req, res) => {
           const obj = p.toObject();
           obj.images = resolvedImages;
           obj.image_url = resolvedImageUrl;
+          obj.sizes = Array.isArray(p.sizes) ? p.sizes : (typeof p.sizes === 'string' ? p.sizes.split(',').map(s => s.trim()).filter(Boolean) : ['S', 'M', 'L', 'XL']);
+          obj.stock = parseInt(p.stock) || 0;
           return obj;
         }));
         total = await Product.countDocuments(query);
@@ -223,6 +227,128 @@ export const getStoreProductDetails = async (req, res) => {
         product = dbProduct.toObject();
         product.images = resolvedImages;
         product.image_url = resolvedImageUrl;
+        product.sizes = Array.isArray(dbProduct.sizes) 
+          ? dbProduct.sizes 
+          : (typeof dbProduct.sizes === 'string' ? dbProduct.sizes.split(',').map(s => s.trim()).filter(Boolean) : ['S', 'M', 'L', 'XL']);
+
+        // Check for ERP variants matching this product
+        let variants = await ProductVariant.find({
+          $or: [
+            { product_id: dbProduct._id },
+            { sku: new RegExp(`^${dbProduct.sku}`, 'i') }
+          ],
+          is_active: true
+        })
+        .populate('colour_id')
+        .populate('size_id')
+        .populate('spec_id')
+        .lean();
+
+        if (variants.length > 0) {
+          // Query live inventory lots for these variants to show real-time stock
+          const variantIds = variants.map(v => v._id);
+          const lots = await InventoryLot.find({
+            variant_id: { $in: variantIds },
+            status: 'AVAILABLE'
+          }).lean();
+
+          variants = variants.map(v => {
+            const varLots = lots.filter(l => String(l.variant_id) === String(v._id));
+            const availableStock = varLots.reduce((sum, l) => sum + (l.available_quantity || 0), 0);
+            const stockQty = availableStock > 0 ? availableStock : (v.stock_quantity || 0);
+            return {
+              ...v,
+              stock_quantity: stockQty,
+              is_in_stock: stockQty > 0
+            };
+          });
+
+          product.variants = variants;
+
+          // Unique Colours
+          const colourMap = new Map();
+          variants.forEach(v => {
+            if (v.colour_id && !colourMap.has(String(v.colour_id._id))) {
+              colourMap.set(String(v.colour_id._id), {
+                _id: v.colour_id._id,
+                name: v.colour_id.name,
+                code: v.colour_id.code,
+                hex_code: v.colour_id.hex_code || '#1C1B19'
+              });
+            } else if (v.colour_name && !colourMap.has(v.colour_name)) {
+              colourMap.set(v.colour_name, {
+                _id: v.colour_name,
+                name: v.colour_name,
+                code: v.colour_name.slice(0, 3).toUpperCase(),
+                hex_code: '#1C1B19'
+              });
+            }
+          });
+          product.colours = Array.from(colourMap.values());
+
+          // Unique Sizes
+          const sizeMap = new Map();
+          variants.forEach(v => {
+            if (v.size_id && !sizeMap.has(String(v.size_id._id))) {
+              sizeMap.set(String(v.size_id._id), {
+                _id: v.size_id._id,
+                name: v.size_id.name,
+                code: v.size_id.code,
+                sort_order: v.size_id.sort_order || 0,
+                chest: v.size_id.chest,
+                length: v.size_id.length,
+                shoulder: v.size_id.shoulder,
+                sleeve: v.size_id.sleeve,
+                is_in_stock: v.is_in_stock,
+                stock: v.stock_quantity
+              });
+            } else if (v.size_name && !sizeMap.has(v.size_name)) {
+              sizeMap.set(v.size_name, {
+                _id: v.size_name,
+                name: v.size_name,
+                code: v.size_name,
+                sort_order: 0,
+                is_in_stock: v.is_in_stock,
+                stock: v.stock_quantity
+              });
+            }
+          });
+          product.available_sizes = Array.from(sizeMap.values()).sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+          if (product.available_sizes.length > 0) {
+            product.sizes = product.available_sizes.map(s => s.name);
+          }
+
+          if (variants[0]?.spec_id) {
+            product.specification = variants[0].spec_id;
+          }
+        }
+
+        // Also fetch specification if attached directly or by category
+        if (!product.specification) {
+          const spec = await ProductSpecification.findOne({
+            $or: [{ product_id: dbProduct._id }, { name: new RegExp(dbProduct.name, 'i') }]
+          }).lean();
+          if (spec) product.specification = spec;
+        }
+
+        // Also fetch size measurements from Master Size table for standard sizes
+        if (!product.available_sizes || product.available_sizes.length === 0) {
+          const masterSizes = await Size.find({ name: { $in: product.sizes } }).lean();
+          if (masterSizes.length > 0) {
+            product.available_sizes = product.sizes.map(sName => {
+              const ms = masterSizes.find(m => m.name.toLowerCase() === sName.toLowerCase());
+              return {
+                name: sName,
+                code: ms?.code || sName,
+                chest: ms?.chest || 0,
+                length: ms?.length || 0,
+                shoulder: ms?.shoulder || 0,
+                sleeve: ms?.sleeve || 0,
+                is_in_stock: (parseInt(product.stock) || 0) > 0
+              };
+            });
+          }
+        }
       }
     }
 
